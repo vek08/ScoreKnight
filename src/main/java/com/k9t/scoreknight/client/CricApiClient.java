@@ -20,7 +20,6 @@ public class CricApiClient {
     }
 
     public String getCurrentMatches() {
-
         return restClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/currentMatches")
@@ -30,4 +29,27 @@ public class CricApiClient {
                 .retrieve()
                 .body(String.class);
     }
+
+    public String getMatchInfo(String matchId) {
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/match_info")
+                        .queryParam("apikey", apiKey)
+                        .queryParam("id", matchId)
+                        .build())
+                .retrieve()
+                .body(String.class);
+    }
+
+    public String getMatchSquad(String matchId) {
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/match_squad")
+                        .queryParam("apikey", apiKey)
+                        .queryParam("id", matchId)
+                        .build())
+                .retrieve()
+                .body(String.class);
+    }
 }
+

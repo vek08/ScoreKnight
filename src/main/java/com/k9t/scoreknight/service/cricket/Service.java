@@ -1,9 +1,10 @@
 package com.k9t.scoreknight.service.cricket;
 
 import com.k9t.scoreknight.dto.cricket.CricketMatchCardDto;
-
-import java.util.List;
+import com.k9t.scoreknight.dto.cricket.HomeMatchesResponseDto;
 
 public interface Service {
-    List<CricketMatchCardDto> getHomeMatches();
+    HomeMatchesResponseDto getHomeMatches();
+    CricketMatchCardDto getMatchDetails(String matchId);
 }
+

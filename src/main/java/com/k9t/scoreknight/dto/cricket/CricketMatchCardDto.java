@@ -25,4 +25,6 @@ public class CricketMatchCardDto {
     private String venue;
 
     private String matchDate;
+
+    private java.util.List<MatchSquadDto> squads;
 }
