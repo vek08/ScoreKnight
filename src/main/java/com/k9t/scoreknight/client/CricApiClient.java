@@ -30,6 +30,17 @@ public class CricApiClient {
                 .body(String.class);
     }
 
+    public String getMatches(int offset) {
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/matches")
+                        .queryParam("apikey", apiKey)
+                        .queryParam("offset", offset)
+                        .build())
+                .retrieve()
+                .body(String.class);
+    }
+
     public String getMatchInfo(String matchId) {
         return restClient.get()
                 .uri(uriBuilder -> uriBuilder
