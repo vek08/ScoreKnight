@@ -29,62 +29,68 @@ public class ServiceImpl implements com.k9t.scoreknight.service.cricket.Service 
             Map<String, CricketMatchCardDto> upcomingMatches = new LinkedHashMap<>();
             Map<String, CricketMatchCardDto> completedMatches = new LinkedHashMap<>();
             Map<String, CricketMatchCardDto> allProcessed = new LinkedHashMap<>();
+            int fetched = 0;
 
             // 1. Fetch current matches first
             try {
                 String currentResponse = cricApiClient.getCurrentMatches();
                 processMatchesResponse(currentResponse, liveMatches, upcomingMatches, completedMatches, allProcessed);
+                JsonNode root = objectMapper.readTree(currentResponse);
+                if (root.has("data") && root.get("data").isArray()) {
+                    fetched += root.get("data").size();
+                }
             } catch (Exception e) {
                 // Log and continue
                 System.err.println("Error fetching current matches: " + e.getMessage());
+                System.err.println("Failed to fetch currentMatches: " + e.getMessage());
             }
 
-            // 2. Fetch all matches with pagination
+            // 2. Fetch paginated match listing for upcoming/completed
             int offset = 0;
-            int fetched = 0;
             while (true) {
-                String response = cricApiClient.getMatches(offset);
-                JsonNode root = objectMapper.readTree(response);
-                
-                if (root.has("status") && "failure".equalsIgnoreCase(root.get("status").asText())) {
-                    String reason = root.has("reason") ? root.get("reason").asText() : "Unknown API error";
-                    if (allProcessed.isEmpty()) {
-                        throw new RuntimeException("CricAPI error: " + reason);
-                    }
+                String response;
+                try {
+                    response = cricApiClient.getMatches(offset);
+                } catch (Exception e) {
+                    System.err.println("Failed to fetch matches at offset " + offset + ": " + e.getMessage());
                     break;
                 }
 
+                JsonNode root = objectMapper.readTree(response);
                 JsonNode data = root.get("data");
                 if (data == null || !data.isArray() || data.isEmpty()) {
                     break;
                 }
 
                 processMatchesResponse(response, liveMatches, upcomingMatches, completedMatches, allProcessed);
-
                 fetched += data.size();
                 
                 JsonNode info = root.get("info");
-                if (info != null && info.has("offsetRows") && info.has("totalRows")) {
-                    int offsetRows = info.get("offsetRows").asInt();
+                if (info != null && info.has("totalRows")) {
                     int totalRows = info.get("totalRows").asInt();
-                    offset += offsetRows > 0 ? offsetRows : data.size();
-                    if (offset >= totalRows || offsetRows == 0) {
+                    offset += data.size();
+                    if (offset >= totalRows) {
                         break;
                     }
                 } else {
                     offset += data.size();
                 }
-
-                // Prevent excessive API calls if totalRows is huge (max 200 matches)
-                if (fetched >= 200) {
-                    break;
-                }
+                
+                // Prevent API quota exhaustion (free tier limit is 100 hits/day)
+                // Fetching up to 100 matches takes ~4 API hits.
+                if (offset > 100) break;
             }
 
             if (allProcessed.isEmpty()) {
                 throw new RuntimeException("No valid matches could be fetched");
             }
 
+            System.out.println("Total API matches = " + fetched);
+            System.out.println("Parsed matches = " + allProcessed.size());
+            System.out.println("Live matches = " + liveMatches.size());
+            System.out.println("Upcoming matches = " + upcomingMatches.size());
+            System.out.println("Completed matches = " + completedMatches.size());
+            
             return HomeMatchesResponseDto.builder()
                     .liveMatches(new ArrayList<>(liveMatches.values()))
                     .upcomingMatches(new ArrayList<>(upcomingMatches.values()))
@@ -105,7 +111,20 @@ public class ServiceImpl implements com.k9t.scoreknight.service.cricket.Service 
         JsonNode data = root.get("data");
         
         if (data != null && data.isArray()) {
+            System.out.println("API total matches: " + data.size());
+            
             for (JsonNode matchNode : data) {
+                System.out.println("matchId: " + (matchNode.has("id") ? matchNode.get("id").asText() : "null"));
+                System.out.println("teams: " + (matchNode.has("teams") ? matchNode.get("teams").toString() : "null"));
+                System.out.println("teamInfo: " + (matchNode.has("teamInfo") ? matchNode.get("teamInfo").toString() : "null"));
+                System.out.println("status: " + (matchNode.has("status") ? matchNode.get("status").asText() : "null"));
+                System.out.println("matchStarted: " + (matchNode.has("matchStarted") ? matchNode.get("matchStarted").asText() : "null"));
+                System.out.println("matchEnded: " + (matchNode.has("matchEnded") ? matchNode.get("matchEnded").asText() : "null"));
+                System.out.println("date: " + (matchNode.has("date") ? matchNode.get("date").asText() : "null"));
+                System.out.println("dateTimeGMT: " + (matchNode.has("dateTimeGMT") ? matchNode.get("dateTimeGMT").asText() : "null"));
+                System.out.println("matchType: " + (matchNode.has("matchType") ? matchNode.get("matchType").asText() : "null"));
+                System.out.println("score: " + (matchNode.has("score") ? matchNode.get("score").toString() : "null"));
+                
                 CricketMatchCardDto dto = parseMatch(matchNode);
                 if (dto == null || dto.getMatchId() == null) continue;
                 
@@ -116,28 +135,31 @@ public class ServiceImpl implements com.k9t.scoreknight.service.cricket.Service 
                 
                 boolean hasMatchStarted = matchNode.has("matchStarted");
                 boolean hasMatchEnded = matchNode.has("matchEnded");
-                
-                if (hasMatchStarted && hasMatchEnded) {
-                    boolean matchStarted = matchNode.get("matchStarted").asBoolean(false);
-                    boolean matchEnded = matchNode.get("matchEnded").asBoolean(false);
-                    
-                    if (matchEnded) {
-                        completedMatches.put(matchId, dto);
-                    } else if (!matchStarted) {
-                        upcomingMatches.put(matchId, dto);
-                    } else {
-                        liveMatches.put(matchId, dto);
-                    }
+                boolean matchStarted = hasMatchStarted && matchNode.get("matchStarted").asBoolean(false);
+                boolean matchEnded = hasMatchEnded && matchNode.get("matchEnded").asBoolean(false);
+
+                if (hasMatchEnded && matchEnded) {
+                    completedMatches.put(matchId, dto);
+                } else if (hasMatchStarted && !matchStarted) {
+                    upcomingMatches.put(matchId, dto);
+                } else if (hasMatchStarted && matchStarted && hasMatchEnded && !matchEnded) {
+                    liveMatches.put(matchId, dto);
                 } else {
                     String status = dto.getStatus() != null ? dto.getStatus().toLowerCase() : "";
                     if (status.contains("won") || status.contains("abandoned") || status.contains("tied") || status.contains("no result") || status.contains("draw")) {
                         completedMatches.put(matchId, dto);
                     } else if (status.contains("live") || status.contains("inning") || status.contains("stump") || status.contains("tea") || status.contains("lunch") || status.contains("rain") || status.contains("bad light")) {
                         liveMatches.put(matchId, dto);
-                    } else if (status.contains("upcoming") || status.contains("yet to begin") || status.contains("toss") || status.contains("starts")) {
+                    } else if (status.contains("upcoming") || status.contains("yet to begin") || status.contains("toss") || status.contains("starts") || status.contains("to begin")) {
                         upcomingMatches.put(matchId, dto);
                     } else {
-                        completedMatches.put(matchId, dto); // Fallback
+                        // Do not classify as completed just because status is unknown.
+                        // Default to upcoming or live based on if we have a score
+                        if (dto.getScore() != null && !dto.getScore().isEmpty()) {
+                            liveMatches.put(matchId, dto);
+                        } else {
+                            upcomingMatches.put(matchId, dto);
+                        }
                     }
                 }
             }
@@ -192,27 +214,29 @@ public class ServiceImpl implements com.k9t.scoreknight.service.cricket.Service 
         } else if (match.has("teams") && match.get("teams").isArray() && match.get("teams").size() >= 2) {
             dto.setTeamA(match.get("teams").get(0).asText());
             dto.setTeamB(match.get("teams").get(1).asText());
+        } else if (match.has("name")) {
+            String name = match.get("name").asText();
+            if (name.contains(" vs ")) {
+                String[] parts = name.split(" vs ");
+                if (parts.length >= 2) {
+                    dto.setTeamA(parts[0].trim());
+                    dto.setTeamB(parts[1].split(",")[0].trim());
+                }
+            }
         }
 
         if (match.has("status")) dto.setStatus(match.get("status").asText());
         if (match.has("venue")) dto.setVenue(match.get("venue").asText());
-        if (match.has("date")) dto.setMatchDate(match.get("date").asText());
+        if (match.has("dateTimeGMT")) {
+            dto.setMatchDate(match.get("dateTimeGMT").asText());
+        } else if (match.has("date")) {
+            dto.setMatchDate(match.get("date").asText());
+        }
         if (match.has("matchType")) dto.setMatchType(match.get("matchType").asText());
 
         if (match.has("score")) {
             JsonNode scoreNode = match.get("score");
-            if (scoreNode.isArray() && !scoreNode.isEmpty()) {
-                JsonNode firstInning = scoreNode.get(0);
-                if (firstInning.has("r") && firstInning.has("w") && firstInning.has("o")) {
-                    dto.setScore(firstInning.get("r").asText() + "/" + firstInning.get("w").asText() + " (" + firstInning.get("o").asText() + ")");
-                }
-            } else if (scoreNode.isObject()) {
-                if (scoreNode.has("r") && scoreNode.has("w") && scoreNode.has("o")) {
-                    dto.setScore(scoreNode.get("r").asText() + "/" + scoreNode.get("w").asText() + " (" + scoreNode.get("o").asText() + ")");
-                }
-            } else if (scoreNode.isTextual()) {
-                dto.setScore(scoreNode.asText());
-            }
+            dto.setScore(scoreNode.toString());
         }
         return dto;
     }
