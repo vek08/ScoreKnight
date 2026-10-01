@@ -30,6 +30,13 @@ public class FootballApiClient {
                 .body(new ParameterizedTypeReference<ApiFootballResponse<ApiFixtureResponse>>() {});
     }
 
+    public ApiFootballResponse<ApiFixtureResponse> getRecentFixtures() {
+        return restClient.get()
+                .uri("/fixtures?last=15")
+                .retrieve()
+                .body(new ParameterizedTypeReference<ApiFootballResponse<ApiFixtureResponse>>() {});
+    }
+
     public ApiFootballResponse<ApiFixtureResponse> getFixturesByDate(String date) {
         return restClient.get()
                 .uri("/fixtures?date=" + date)
@@ -58,3 +65,4 @@ public class FootballApiClient {
                 .body(new ParameterizedTypeReference<ApiFootballResponse<ApiStandingResponse>>() {});
     }
 }
+

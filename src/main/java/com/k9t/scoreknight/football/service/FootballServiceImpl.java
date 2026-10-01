@@ -26,6 +26,7 @@ public class FootballServiceImpl implements FootballService {
 
     @Override
     public HomeFootballMatchesResponseDto getHomeMatches() {
+        System.out.println("=== INSIDE getHomeMatches ===");
         HomeFootballMatchesResponseDto response = new HomeFootballMatchesResponseDto();
         
         List<FootballMatchCardDto> liveMatches = new ArrayList<>();
@@ -39,7 +40,7 @@ public class FootballServiceImpl implements FootballService {
         List<FootballMatchCardDto> upcomingMatches = new ArrayList<>();
         List<FootballMatchCardDto> completedMatches = new ArrayList<>();
         
-        try {
+                try {
             var todayRes = apiClient.getFixturesByDate(LocalDate.now().toString());
             if (todayRes != null && todayRes.getResponse() != null) {
                 todayRes.getResponse().forEach(f -> {
@@ -51,7 +52,29 @@ public class FootballServiceImpl implements FootballService {
                     }
                 });
             }
-        } catch (Exception ignored) {}
+            
+                                    // If we don't have enough completed matches from today, fetch recent past fixtures by explicitly checking previous dates
+            int daysBack = 1;
+            while (completedMatches.size() < 10 && daysBack <= 3) {
+                var pastRes = apiClient.getFixturesByDate(LocalDate.now().minusDays(daysBack).toString());
+                if (pastRes != null && pastRes.getResponse() != null) {
+                    pastRes.getResponse().forEach(f -> {
+                        String status = f.getFixture().getStatus().getShort();
+                        if ("FT".equals(status) || "AET".equals(status) || "PEN".equals(status) || "AWD".equals(status) || "WO".equals(status)) {
+                            // Avoid duplicates
+                            boolean exists = completedMatches.stream().anyMatch(c -> c.getId().equals(f.getFixture().getId()));
+                            if (!exists) {
+                                completedMatches.add(mapToDto(f));
+                            }
+                        }
+                    });
+                }
+                daysBack++;
+            }
+        } catch (Exception e) {
+            System.err.println("Exception fetching matches: " + e.getMessage());
+            e.printStackTrace();
+        }
         
         response.setLiveMatches(liveMatches);
         response.setUpcomingMatches(upcomingMatches);
@@ -175,3 +198,10 @@ public class FootballServiceImpl implements FootballService {
         return dto;
     }
 }
+
+
+
+
+
+
+
